@@ -130,6 +130,19 @@ func TestSimilarArtistsFallsThrough(t *testing.T) {
 	}
 }
 
+// AudioMuse resolves `artist` ids on the default server only; `artist_id` uses `server`.
+func TestSimilarArtistsSendsArtistID(t *testing.T) {
+	setup(t, map[string]string{configServer: "lera-id"})
+	host.HTTPMock.On("Send", mock.MatchedBy(func(req host.HTTPRequest) bool {
+		return strings.Contains(req.URL, "artist_id=a1") && !strings.Contains(req.URL, "artist=a1")
+	})).Return(&host.HTTPResponse{StatusCode: 200, Body: []byte(`[{"artist":"X","artist_id":"ax"}]`)}, nil)
+
+	resp, err := (&audioMusePlugin{}).GetSimilarArtists(metadata.SimilarArtistsRequest{ID: "a1"})
+	if err != nil || len(resp.Artists) != 1 {
+		t.Fatalf("got %+v, %v", resp, err)
+	}
+}
+
 func TestSonicPathFallsThrough(t *testing.T) {
 	setup(t, map[string]string{configServer: "tom-id,lera-id"})
 	onServer("tom-id", 404, `{"error":"No path found"}`)

@@ -36,7 +36,8 @@ func getSimilarArtistsFrom(server, id string, includeComponentMatches bool) ([]S
 	artistCount := getConfigInt("artistSimilarCount", defaultArtistSimilarCount)
 
 	params := url.Values{}
-	params.Set("artist", id)
+	// artist_id is resolved on `server`; `artist` only on AudioMuse's default server.
+	params.Set("artist_id", id)
 	params.Set("n", strconv.Itoa(artistCount))
 	params.Set("include_component_matches", strconv.FormatBool(includeComponentMatches))
 	if server != "" {
