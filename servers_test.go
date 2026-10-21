@@ -150,6 +150,8 @@ func TestSimilarArtistsWithoutIDUsePrimaryCredit(t *testing.T) {
 	setup(t, map[string]string{})
 	host.HTTPMock.On("Send", mock.Anything).Return(&host.HTTPResponse{StatusCode: 200, Body: []byte(`[
 		{"artist":"NILETTO feat. MaxWell Show","artist_id":null},
+		{"artist":"Madonna","artist_id":"md"},
+		{"artist":"Seed","artist_id":"a1"},
 		{"artist":"Seed ft. Someone","artist_id":null},
 		{"artist":"niletto, DJ M.E.G.","artist_id":null},
 		{"artist":"Morandi & Eneli","artist_id":null},
@@ -160,7 +162,7 @@ func TestSimilarArtistsWithoutIDUsePrimaryCredit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []metadata.ArtistRef{{Name: "NILETTO"}, {Name: "Morandi"}, {Name: "Madonna"}, {ID: "ax", Name: "TERIYAKI BOYZ feat. Pusha T"}}
+	want := []metadata.ArtistRef{{Name: "NILETTO"}, {ID: "md", Name: "Madonna"}, {Name: "Morandi"}, {ID: "ax", Name: "TERIYAKI BOYZ feat. Pusha T"}}
 	if fmt.Sprint(resp.Artists) != fmt.Sprint(want) {
 		t.Fatalf("got %+v, want %+v", resp.Artists, want)
 	}
