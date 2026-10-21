@@ -595,21 +595,26 @@ func (p *audioMusePlugin) GetSimilarArtists(input metadata.SimilarArtistsRequest
 
 	seen := make(map[string]bool)
 	for _, a := range artists {
+		ref := metadata.ArtistRef{ID: a.ArtistID, Name: a.Artist}
+		key := "id:" + a.ArtistID
 		if a.ArtistID == "" {
-			continue
+			// AudioMuse indexes track-artist credits ("A feat. B"), which have no
+			// Navidrome artist; Navidrome name-matches the primary credit instead.
+			ref.Name = primaryCredit(a.Artist)
+			key = "name:" + strings.ToLower(ref.Name)
+			if ref.Name == "" || strings.EqualFold(ref.Name, input.Name) {
+				continue
+			}
 		}
 		if a.ArtistID == input.ID {
 			continue
 		}
-		if seen[a.ArtistID] {
+		if seen[key] {
 			continue
 		}
-		seen[a.ArtistID] = true
+		seen[key] = true
 
-		res.Artists = append(res.Artists, metadata.ArtistRef{
-			ID:   a.ArtistID,
-			Name: a.Artist,
-		})
+		res.Artists = append(res.Artists, ref)
 	}
 
 	pdk.Log(pdk.LogInfo, fmt.Sprintf("[AudioMuse] Returning %d related artists to Navidrome", len(res.Artists)))

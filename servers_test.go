@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -140,6 +141,28 @@ func TestSimilarArtistsSendsArtistID(t *testing.T) {
 	resp, err := (&audioMusePlugin{}).GetSimilarArtists(metadata.SimilarArtistsRequest{ID: "a1"})
 	if err != nil || len(resp.Artists) != 1 {
 		t.Fatalf("got %+v, %v", resp, err)
+	}
+}
+
+// AudioMuse indexes track-artist credits ("A feat. B") that have no Navidrome artist id;
+// send the primary credit by name so Navidrome's name match can still link it.
+func TestSimilarArtistsWithoutIDUsePrimaryCredit(t *testing.T) {
+	setup(t, map[string]string{})
+	host.HTTPMock.On("Send", mock.Anything).Return(&host.HTTPResponse{StatusCode: 200, Body: []byte(`[
+		{"artist":"NILETTO feat. MaxWell Show","artist_id":null},
+		{"artist":"Seed ft. Someone","artist_id":null},
+		{"artist":"niletto, DJ M.E.G.","artist_id":null},
+		{"artist":"Morandi & Eneli","artist_id":null},
+		{"artist":"Madonna • Kimi Djabatè","artist_id":null},
+		{"artist":"TERIYAKI BOYZ feat. Pusha T","artist_id":"ax"}]`)}, nil)
+
+	resp, err := (&audioMusePlugin{}).GetSimilarArtists(metadata.SimilarArtistsRequest{ID: "a1", Name: "Seed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []metadata.ArtistRef{{Name: "NILETTO"}, {Name: "Morandi"}, {Name: "Madonna"}, {ID: "ax", Name: "TERIYAKI BOYZ feat. Pusha T"}}
+	if fmt.Sprint(resp.Artists) != fmt.Sprint(want) {
+		t.Fatalf("got %+v, want %+v", resp.Artists, want)
 	}
 }
 

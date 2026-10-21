@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/navidrome/navidrome/plugins/pdk/go/host"
 	"github.com/navidrome/navidrome/plugins/pdk/go/pdk"
@@ -23,6 +25,14 @@ type SimilarArtistsResponse struct {
 			Title  string `json:"title"`
 		} `json:"artist2_representative_songs"`
 	} `json:"component_matches"`
+}
+
+// creditSeparator splits a track-artist credit into its artists.
+var creditSeparator = regexp.MustCompile(`(?i)\s+(?:feat\.?|ft\.?|featuring)\s+|\s*[,&•]\s*`)
+
+// primaryCredit returns the first artist of a credit: "A feat. B" -> "A".
+func primaryCredit(credit string) string {
+	return strings.TrimSpace(creditSeparator.Split(credit, 2)[0])
 }
 
 func getSimilarArtists(id string, includeComponentMatches bool) ([]SimilarArtistsResponse, error) {
