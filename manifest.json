@@ -1,9 +1,9 @@
 {
   "name": "AudioMuse-AI Instant Mix",
   "id": "audiomuseai",
-  "author": "AudioMuse",
+  "author": "AudioMuse (Tomvis fork)",
   "website": "https://github.com/NeptuneHub/AudioMuse-AI-NV-plugin",
-  "version": "1.0.0",
+  "version": "10.1.0",
   "description": "Replaces the Instant Mix button with AudioMuse-AI recommendations for similar tracks",
   "config": {
     "schema": {
@@ -23,7 +23,7 @@
         "server": {
           "type": "string",
           "title": "Server Name",
-          "description": "Server name as configured in AudioMuse-AI multi-server setup (e.g. 'Navidrome'). Leave blank if multi-server is not used; the parameter will not be sent."
+          "description": "Server name or id as configured in AudioMuse-AI multi-server setup (e.g. 'Navidrome'). Comma-separate several (one per Navidrome user): each lookup tries them in order and uses the first that knows the item. Leave blank if multi-server is not used; the parameter will not be sent."
         },
         "artistSimilarCount": {
           "type": "integer",

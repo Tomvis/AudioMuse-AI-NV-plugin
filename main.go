@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 
 	"audiomuse-navidrome-plugin/sonicsimilarity"
 	"github.com/navidrome/navidrome/plugins/pdk/go/host"
@@ -109,6 +111,59 @@ func getConfigBool(key string, defaultValue bool) bool {
 	return defaultValue
 }
 
+// errServerMiss marks a 404: this AudioMuse-AI server doesn't index the item, so the next one may.
+var errServerMiss = errors.New("not found on this AudioMuse-AI server")
+
+// configuredServers splits the server setting on commas. Navidrome doesn't say which user is asking,
+// so with one AudioMuse-AI server per Navidrome user each lookup tries them in order. A blank setting
+// yields one entry that sends no server parameter.
+func configuredServers() []string {
+	var servers []string
+	for _, s := range strings.Split(getConfigString(configServer, ""), ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			servers = append(servers, s)
+		}
+	}
+	if len(servers) == 0 {
+		return []string{""}
+	}
+	return servers
+}
+
+// withServers calls fetch for each configured server until one knows the item. Errors other than a
+// miss are returned at once, so an outage isn't masked by the next server's 404.
+func withServers[T any](fetch func(server string) (T, error)) (T, error) {
+	var zero T
+	var err error
+	for _, server := range configuredServers() {
+		var v T
+		if v, err = fetch(server); err == nil {
+			return v, nil
+		}
+		if !errors.Is(err, errServerMiss) {
+			return zero, err
+		}
+	}
+	return zero, err
+}
+
+// statusError wraps a non-200 AudioMuse-AI status, flagging 404 as a miss.
+func statusError(status int32, detail string) error {
+	err := fmt.Errorf("AudioMuse-AI returned status %d%s", status, detail)
+	if status == 404 {
+		return fmt.Errorf("%w: %w", errServerMiss, err)
+	}
+	return err
+}
+
+// statusLogLevel logs a miss at info: with several servers, most lookups miss on all but one.
+func statusLogLevel(status int32) pdk.LogLevel {
+	if status == 404 {
+		return pdk.LogInfo
+	}
+	return pdk.LogError
+}
+
 // authHeaders returns a headers map with a Bearer token if configured, or nil otherwise.
 func authHeaders() map[string]string {
 	if token := getConfigString(configAPIToken, ""); token != "" {
@@ -153,17 +208,19 @@ func (p *audioMusePlugin) GetSimilarSongsByTrack(input metadata.SimilarSongsByTr
 }
 
 func (p *audioMusePlugin) getAudioMuseSimilarTracks(itemID string, count int) ([]audioMuseTrackResponse, error) {
-	switch getConfigString(configInstantMixSource, defaultInstantMixSource) {
-	case instantMixLyricsBySong:
-		return getLyricsSimilarTracks(itemID, count)
-	case instantMixHyperbolic:
-		return getHyperbolicSimilarTracks(itemID, count)
-	default:
-		return getSimilarTracks(itemID, count)
-	}
+	return withServers(func(server string) ([]audioMuseTrackResponse, error) {
+		switch getConfigString(configInstantMixSource, defaultInstantMixSource) {
+		case instantMixLyricsBySong:
+			return getLyricsSimilarTracks(server, itemID, count)
+		case instantMixHyperbolic:
+			return getHyperbolicSimilarTracks(server, itemID, count)
+		default:
+			return getSimilarTracks(server, itemID, count)
+		}
+	})
 }
 
-func getSimilarTracks(itemID string, count int) ([]audioMuseTrackResponse, error) {
+func getSimilarTracks(server, itemID string, count int) ([]audioMuseTrackResponse, error) {
 	apiBaseURL := getConfigString(configAPIUrl, defaultAPIUrl)
 	eliminateDuplicates := getConfigBool(configEliminateDuplicates, defaultEliminateDuplicates)
 	radiusSimilarity := getConfigBool(configRadiusSimilarity, defaultRadiusSimilarity)
@@ -173,7 +230,7 @@ func getSimilarTracks(itemID string, count int) ([]audioMuseTrackResponse, error
 	params.Set("n", strconv.Itoa(count))
 	params.Set("eliminate_duplicates", strconv.FormatBool(eliminateDuplicates))
 	params.Set("radius_similarity", strconv.FormatBool(radiusSimilarity))
-	if server := getConfigString(configServer, ""); server != "" {
+	if server != "" {
 		params.Set("server", server)
 	}
 
@@ -200,8 +257,8 @@ func getSimilarTracks(itemID string, count int) ([]audioMuseTrackResponse, error
 	pdk.Log(pdk.LogInfo, fmt.Sprintf("[AudioMuse] API response status: %d", resp.StatusCode))
 	if resp.StatusCode != 200 {
 		errMsg := fmt.Sprintf("[AudioMuse] ERROR: AudioMuse-AI returned status %d", resp.StatusCode)
-		pdk.Log(pdk.LogError, errMsg)
-		return nil, fmt.Errorf("AudioMuse-AI returned status %d", resp.StatusCode)
+		pdk.Log(statusLogLevel(resp.StatusCode), errMsg)
+		return nil, statusError(resp.StatusCode, "")
 	}
 
 	var tracks []audioMuseTrackResponse
@@ -215,8 +272,8 @@ func getSimilarTracks(itemID string, count int) ([]audioMuseTrackResponse, error
 	return tracks, nil
 }
 
-func getLyricsSimilarTracks(itemID string, count int) ([]audioMuseTrackResponse, error) {
-	results, err := postAudioMuseSimilarTracks("/api/sem_grove/search", "sem_grove_search", itemID, count+1)
+func getLyricsSimilarTracks(server, itemID string, count int) ([]audioMuseTrackResponse, error) {
+	results, err := postAudioMuseSimilarTracks(server, "/api/sem_grove/search", "sem_grove_search", itemID, count+1)
 	if err != nil {
 		return nil, err
 	}
@@ -239,8 +296,8 @@ func getLyricsSimilarTracks(itemID string, count int) ([]audioMuseTrackResponse,
 	return tracks, nil
 }
 
-func getHyperbolicSimilarTracks(itemID string, count int) ([]audioMuseTrackResponse, error) {
-	results, err := postAudioMuseSimilarTracks("/api/hyperbolic/similar", "hyperbolic_similar", itemID, count)
+func getHyperbolicSimilarTracks(server, itemID string, count int) ([]audioMuseTrackResponse, error) {
+	results, err := postAudioMuseSimilarTracks(server, "/api/hyperbolic/similar", "hyperbolic_similar", itemID, count)
 	if err != nil {
 		return nil, err
 	}
@@ -270,11 +327,11 @@ func apiErrorMessage(body []byte) string {
 	return string(body)
 }
 
-func postAudioMuseSimilarTracks(endpoint, label, itemID string, count int) ([]audioMuseTrackResponse, error) {
+func postAudioMuseSimilarTracks(server, endpoint, label, itemID string, count int) ([]audioMuseTrackResponse, error) {
 	apiBaseURL := getConfigString(configAPIUrl, defaultAPIUrl)
 
 	body := map[string]any{"item_id": itemID, "limit": count}
-	if server := getConfigString(configServer, ""); server != "" {
+	if server != "" {
 		body["server"] = server
 	}
 
@@ -310,8 +367,8 @@ func postAudioMuseSimilarTracks(endpoint, label, itemID string, count int) ([]au
 	if resp.StatusCode != 200 {
 		apiError := apiErrorMessage(resp.Body)
 		errMsg := fmt.Sprintf("[AudioMuse] ERROR: AudioMuse-AI returned status %d: %s", resp.StatusCode, apiError)
-		pdk.Log(pdk.LogError, errMsg)
-		return nil, fmt.Errorf("AudioMuse-AI returned status %d: %s", resp.StatusCode, apiError)
+		pdk.Log(statusLogLevel(resp.StatusCode), errMsg)
+		return nil, statusError(resp.StatusCode, ": "+apiError)
 	}
 
 	var result audioMuseResultsResponse
@@ -365,45 +422,11 @@ func (p *audioMusePlugin) FindSonicPath(input sonicsimilarity.FindSonicPathReque
 		count = 25
 	}
 
-	apiBaseURL := getConfigString(configAPIUrl, defaultAPIUrl)
-	params := url.Values{}
-	params.Set("start_song_id", input.StartSong.ID)
-	params.Set("end_song_id", input.EndSong.ID)
-	params.Set("count", strconv.Itoa(count))
-	params.Set("max_steps", strconv.Itoa(count))
-	params.Set("path_fix_size", "false")
-	params.Set("mood_pct", "100")
-	if server := getConfigString(configServer, ""); server != "" {
-		params.Set("server", server)
-	}
-
-	apiURL := fmt.Sprintf("%s/api/find_path?%s", apiBaseURL, params.Encode())
-	pdk.Log(pdk.LogInfo, fmt.Sprintf("[AudioMuse] Calling FindSonicPath API from %s to %s: %s", input.StartSong.ID, input.EndSong.ID, apiURL))
-
-	resp, err := host.HTTPSend(host.HTTPRequest{
-		Method:  "GET",
-		URL:     apiURL,
-		Headers: authHeaders(),
+	result, err := withServers(func(server string) (audioMusePathResponse, error) {
+		return findPath(server, input.StartSong.ID, input.EndSong.ID, count)
 	})
 	if err != nil {
-		pdk.Log(pdk.LogError, fmt.Sprintf("[AudioMuse] ERROR: HTTP request failed: %v", err))
-		return sonicsimilarity.SonicSimilarityResponse{}, fmt.Errorf("AudioMuse-AI HTTP request failed: %w", err)
-	}
-
-	if resp == nil {
-		pdk.Log(pdk.LogError, "[AudioMuse] ERROR: empty HTTP response")
-		return sonicsimilarity.SonicSimilarityResponse{}, fmt.Errorf("AudioMuse-AI returned an empty HTTP response")
-	}
-
-	if resp.StatusCode != 200 {
-		pdk.Log(pdk.LogError, fmt.Sprintf("[AudioMuse] ERROR: AudioMuse-AI returned status %d", resp.StatusCode))
-		return sonicsimilarity.SonicSimilarityResponse{}, fmt.Errorf("AudioMuse-AI returned status %d", resp.StatusCode)
-	}
-
-	var result audioMusePathResponse
-	if err := json.Unmarshal(resp.Body, &result); err != nil {
-		pdk.Log(pdk.LogError, fmt.Sprintf("[AudioMuse] ERROR: Failed to parse FindSonicPath response: %v", err))
-		return sonicsimilarity.SonicSimilarityResponse{}, fmt.Errorf("failed to parse AudioMuse-AI find path response: %w", err)
+		return sonicsimilarity.SonicSimilarityResponse{}, err
 	}
 
 	matches := make([]sonicsimilarity.SonicMatch, 0, len(result.Path))
@@ -420,6 +443,50 @@ func (p *audioMusePlugin) FindSonicPath(input sonicsimilarity.FindSonicPathReque
 	}
 
 	return sonicsimilarity.SonicSimilarityResponse{Matches: matches}, nil
+}
+
+func findPath(server, startID, endID string, count int) (audioMusePathResponse, error) {
+	apiBaseURL := getConfigString(configAPIUrl, defaultAPIUrl)
+	params := url.Values{}
+	params.Set("start_song_id", startID)
+	params.Set("end_song_id", endID)
+	params.Set("count", strconv.Itoa(count))
+	params.Set("max_steps", strconv.Itoa(count))
+	params.Set("path_fix_size", "false")
+	params.Set("mood_pct", "100")
+	if server != "" {
+		params.Set("server", server)
+	}
+
+	apiURL := fmt.Sprintf("%s/api/find_path?%s", apiBaseURL, params.Encode())
+	pdk.Log(pdk.LogInfo, fmt.Sprintf("[AudioMuse] Calling FindSonicPath API from %s to %s: %s", startID, endID, apiURL))
+
+	resp, err := host.HTTPSend(host.HTTPRequest{
+		Method:  "GET",
+		URL:     apiURL,
+		Headers: authHeaders(),
+	})
+	if err != nil {
+		pdk.Log(pdk.LogError, fmt.Sprintf("[AudioMuse] ERROR: HTTP request failed: %v", err))
+		return audioMusePathResponse{}, fmt.Errorf("AudioMuse-AI HTTP request failed: %w", err)
+	}
+
+	if resp == nil {
+		pdk.Log(pdk.LogError, "[AudioMuse] ERROR: empty HTTP response")
+		return audioMusePathResponse{}, fmt.Errorf("AudioMuse-AI returned an empty HTTP response")
+	}
+
+	if resp.StatusCode != 200 {
+		pdk.Log(statusLogLevel(resp.StatusCode), fmt.Sprintf("[AudioMuse] ERROR: AudioMuse-AI returned status %d", resp.StatusCode))
+		return audioMusePathResponse{}, statusError(resp.StatusCode, "")
+	}
+
+	var result audioMusePathResponse
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
+		pdk.Log(pdk.LogError, fmt.Sprintf("[AudioMuse] ERROR: Failed to parse FindSonicPath response: %v", err))
+		return audioMusePathResponse{}, fmt.Errorf("failed to parse AudioMuse-AI find path response: %w", err)
+	}
+	return result, nil
 }
 
 func normalizeSimilarity(distance float64) float64 {

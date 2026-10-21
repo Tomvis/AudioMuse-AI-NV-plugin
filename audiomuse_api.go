@@ -26,6 +26,12 @@ type SimilarArtistsResponse struct {
 }
 
 func getSimilarArtists(id string, includeComponentMatches bool) ([]SimilarArtistsResponse, error) {
+	return withServers(func(server string) ([]SimilarArtistsResponse, error) {
+		return getSimilarArtistsFrom(server, id, includeComponentMatches)
+	})
+}
+
+func getSimilarArtistsFrom(server, id string, includeComponentMatches bool) ([]SimilarArtistsResponse, error) {
 	apiBaseURL := getConfigString(configAPIUrl, defaultAPIUrl)
 	artistCount := getConfigInt("artistSimilarCount", defaultArtistSimilarCount)
 
@@ -33,7 +39,7 @@ func getSimilarArtists(id string, includeComponentMatches bool) ([]SimilarArtist
 	params.Set("artist", id)
 	params.Set("n", strconv.Itoa(artistCount))
 	params.Set("include_component_matches", strconv.FormatBool(includeComponentMatches))
-	if server := getConfigString(configServer, ""); server != "" {
+	if server != "" {
 		params.Set("server", server)
 	}
 
@@ -62,8 +68,8 @@ func getSimilarArtists(id string, includeComponentMatches bool) ([]SimilarArtist
 	pdk.Log(pdk.LogInfo, fmt.Sprintf("[AudioMuse] API response status: %d", resp.StatusCode))
 	if resp.StatusCode != 200 {
 		errMsg := fmt.Sprintf("[AudioMuse] ERROR: AudioMuse-AI returned status %d", resp.StatusCode)
-		pdk.Log(pdk.LogError, errMsg)
-		return nil, fmt.Errorf("AudioMuse-AI returned status %d", resp.StatusCode)
+		pdk.Log(statusLogLevel(resp.StatusCode), errMsg)
+		return nil, statusError(resp.StatusCode, "")
 	}
 
 	var artists []SimilarArtistsResponse
