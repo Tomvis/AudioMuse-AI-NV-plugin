@@ -30,6 +30,7 @@ For Mobile app that want to map this functionality they need to implement the `g
 Other frontnend not in this list could also work by using those API even.
 
 **NEWS**
+> * From AudioMuse-AI-NV-plugin v11 InstantMix support also DCLAP. To use it you **must** have AudioMuse-AI v3.7.0 or higher
 > * From AudioMuse-AI-NV-plugin v10 different AudioMuse-AI functionality can be selected for the InstantMix, chose it in the plugin configuration
 > * From AudioMuse-AI-NV-plugin v8 the Sonic Similarity API extension are supported on top of the previous one. The API are [documented here](https://opensubsonic.netlify.app/docs/extensions/sonicsimilarity/) and supported by [this Navidrome PR](https://github.com/navidrome/navidrome/pull/5419)
 > * InstantMix support in Navidrome start from v0.60.0: https://github.com/navidrome/navidrome/releases/tag/v0.60.0
@@ -76,9 +77,10 @@ services:
 > - The **Instant Mix Functionality** select choose which AudioMuse-AI engine answer Instant Mix and Sonic Similarity:
 >   - **Similar Song** (default) - `GET /api/similar_tracks`, the historical behaviour;
 >   - **Lyrics by Song** - `POST /api/sem_grove/search`, it need the SemGrove index (lyrics + audio analysis) built in AudioMuse-AI;
->   - **Hyperbolic Similarity** - `POST /api/hyperbolic/similar` in its standard mode, it need the hyperbolic projection built in AudioMuse-AI.
+>   - **Hyperbolic Similarity** - `POST /api/hyperbolic/similar` in its standard mode, it need the hyperbolic projection built in AudioMuse-AI;
+>   - **DCLAP** - `POST /api/clap/search_by_song`, it need CLAP enabled and the DCLAP index built in AudioMuse-AI.
 >
->   'Eliminate Duplicates' and 'Use Radius Similarity' apply only to **Similar Song**, the other two engine use the AudioMuse-AI default.
+>   'Eliminate Duplicates' apply to **Similar Song** and **DCLAP**, 'Use Radius Similarity' apply only to **Similar Song**, the other engine use the AudioMuse-AI default.
 
 See the official [Navidrome Documentation](https://www.navidrome.org/docs/usage/features/plugins/#managing-plugins-in-the-web-ui) for more information on how the plugin works.
 

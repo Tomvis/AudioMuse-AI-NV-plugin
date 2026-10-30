@@ -29,6 +29,7 @@ const (
 	instantMixSimilarSong  = "similarSong"
 	instantMixLyricsBySong = "lyricsBySong"
 	instantMixHyperbolic   = "hyperbolic"
+	instantMixDCLAP        = "dclap"
 )
 
 // Default values
@@ -214,6 +215,8 @@ func (p *audioMusePlugin) getAudioMuseSimilarTracks(itemID string, count int) ([
 			return getLyricsSimilarTracks(server, itemID, count)
 		case instantMixHyperbolic:
 			return getHyperbolicSimilarTracks(server, itemID, count)
+		case instantMixDCLAP:
+			return getDCLAPSimilarTracks(server, itemID, count)
 		default:
 			return getSimilarTracks(server, itemID, count)
 		}
@@ -273,7 +276,7 @@ func getSimilarTracks(server, itemID string, count int) ([]audioMuseTrackRespons
 }
 
 func getLyricsSimilarTracks(server, itemID string, count int) ([]audioMuseTrackResponse, error) {
-	results, err := postAudioMuseSimilarTracks(server, "/api/sem_grove/search", "sem_grove_search", itemID, count+1)
+	results, err := postAudioMuseSimilarTracks(server, "/api/sem_grove/search", "sem_grove_search", itemID, count+1, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +300,7 @@ func getLyricsSimilarTracks(server, itemID string, count int) ([]audioMuseTrackR
 }
 
 func getHyperbolicSimilarTracks(server, itemID string, count int) ([]audioMuseTrackResponse, error) {
-	results, err := postAudioMuseSimilarTracks(server, "/api/hyperbolic/similar", "hyperbolic_similar", itemID, count)
+	results, err := postAudioMuseSimilarTracks(server, "/api/hyperbolic/similar", "hyperbolic_similar", itemID, count, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -306,6 +309,27 @@ func getHyperbolicSimilarTracks(server, itemID string, count int) ([]audioMuseTr
 	for _, track := range results {
 		if track.Distance > 0 {
 			track.Distance = track.Distance / (1 + track.Distance)
+		}
+		tracks = append(tracks, track)
+	}
+
+	pdk.Log(pdk.LogInfo, fmt.Sprintf("[AudioMuse] Successfully parsed %d similar tracks", len(tracks)))
+	return tracks, nil
+}
+
+func getDCLAPSimilarTracks(server, itemID string, count int) ([]audioMuseTrackResponse, error) {
+	extra := map[string]any{
+		"eliminate_duplicates": getConfigBool(configEliminateDuplicates, defaultEliminateDuplicates),
+	}
+	results, err := postAudioMuseSimilarTracks(server, "/api/clap/search_by_song", "clap_search_by_song", itemID, count, extra)
+	if err != nil {
+		return nil, err
+	}
+
+	tracks := make([]audioMuseTrackResponse, 0, len(results))
+	for _, track := range results {
+		if track.Similarity >= 0 {
+			track.Distance = 1 - track.Similarity
 		}
 		tracks = append(tracks, track)
 	}
@@ -327,10 +351,13 @@ func apiErrorMessage(body []byte) string {
 	return string(body)
 }
 
-func postAudioMuseSimilarTracks(server, endpoint, label, itemID string, count int) ([]audioMuseTrackResponse, error) {
+func postAudioMuseSimilarTracks(server, endpoint, label, itemID string, count int, extra map[string]any) ([]audioMuseTrackResponse, error) {
 	apiBaseURL := getConfigString(configAPIUrl, defaultAPIUrl)
 
 	body := map[string]any{"item_id": itemID, "limit": count}
+	for key, value := range extra {
+		body[key] = value
+	}
 	if server != "" {
 		body["server"] = server
 	}
