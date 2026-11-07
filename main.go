@@ -23,6 +23,7 @@ const (
 	configEliminateDuplicates = "eliminateDuplicates"
 	configRadiusSimilarity    = "radiusSimilarity"
 	configInstantMixSource    = "instantMixSource"
+	configAlchemyTemperature  = "alchemyTemperature"
 )
 
 const (
@@ -30,6 +31,7 @@ const (
 	instantMixLyricsBySong = "lyricsBySong"
 	instantMixHyperbolic   = "hyperbolic"
 	instantMixDCLAP        = "dclap"
+	instantMixSongAlchemy  = "songAlchemy"
 )
 
 // Default values
@@ -39,6 +41,7 @@ const (
 	defaultEliminateDuplicates = true
 	defaultRadiusSimilarity    = true
 	defaultInstantMixSource    = instantMixSimilarSong
+	defaultAlchemyTemperature  = 1.0
 )
 
 // Compile-time check that we implement necessary interfaces
@@ -99,6 +102,16 @@ func getConfigInt(key string, defaultValue int) int {
 	if value, ok := pdk.GetConfig(key); ok && value != "" {
 		if intVal, err := strconv.Atoi(value); err == nil {
 			return intVal
+		}
+	}
+	return defaultValue
+}
+
+// getConfigFloat retrieves a float config value with a default fallback
+func getConfigFloat(key string, defaultValue float64) float64 {
+	if value, ok := pdk.GetConfig(key); ok && value != "" {
+		if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+			return floatVal
 		}
 	}
 	return defaultValue
@@ -217,6 +230,8 @@ func (p *audioMusePlugin) getAudioMuseSimilarTracks(itemID string, count int) ([
 			return getHyperbolicSimilarTracks(server, itemID, count)
 		case instantMixDCLAP:
 			return getDCLAPSimilarTracks(server, itemID, count)
+		case instantMixSongAlchemy:
+			return getSongAlchemySimilarTracks(server, itemID, count)
 		default:
 			return getSimilarTracks(server, itemID, count)
 		}
@@ -276,7 +291,7 @@ func getSimilarTracks(server, itemID string, count int) ([]audioMuseTrackRespons
 }
 
 func getLyricsSimilarTracks(server, itemID string, count int) ([]audioMuseTrackResponse, error) {
-	results, err := postAudioMuseSimilarTracks(server, "/api/sem_grove/search", "sem_grove_search", itemID, count+1, nil)
+	results, err := postAudioMuseSimilarTracks(server, "/api/sem_grove/search", "sem_grove_search", map[string]any{"item_id": itemID, "limit": count + 1})
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +315,7 @@ func getLyricsSimilarTracks(server, itemID string, count int) ([]audioMuseTrackR
 }
 
 func getHyperbolicSimilarTracks(server, itemID string, count int) ([]audioMuseTrackResponse, error) {
-	results, err := postAudioMuseSimilarTracks(server, "/api/hyperbolic/similar", "hyperbolic_similar", itemID, count, nil)
+	results, err := postAudioMuseSimilarTracks(server, "/api/hyperbolic/similar", "hyperbolic_similar", map[string]any{"item_id": itemID, "limit": count})
 	if err != nil {
 		return nil, err
 	}
@@ -318,10 +333,12 @@ func getHyperbolicSimilarTracks(server, itemID string, count int) ([]audioMuseTr
 }
 
 func getDCLAPSimilarTracks(server, itemID string, count int) ([]audioMuseTrackResponse, error) {
-	extra := map[string]any{
+	body := map[string]any{
+		"item_id":              itemID,
+		"limit":                count,
 		"eliminate_duplicates": getConfigBool(configEliminateDuplicates, defaultEliminateDuplicates),
 	}
-	results, err := postAudioMuseSimilarTracks(server, "/api/clap/search_by_song", "clap_search_by_song", itemID, count, extra)
+	results, err := postAudioMuseSimilarTracks(server, "/api/clap/search_by_song", "clap_search_by_song", body)
 	if err != nil {
 		return nil, err
 	}
@@ -332,6 +349,21 @@ func getDCLAPSimilarTracks(server, itemID string, count int) ([]audioMuseTrackRe
 			track.Distance = 1 - track.Similarity
 		}
 		tracks = append(tracks, track)
+	}
+
+	pdk.Log(pdk.LogInfo, fmt.Sprintf("[AudioMuse] Successfully parsed %d similar tracks", len(tracks)))
+	return tracks, nil
+}
+
+func getSongAlchemySimilarTracks(server, itemID string, count int) ([]audioMuseTrackResponse, error) {
+	body := map[string]any{
+		"items":       []map[string]string{{"id": itemID, "op": "ADD"}},
+		"n":           count,
+		"temperature": getConfigFloat(configAlchemyTemperature, defaultAlchemyTemperature),
+	}
+	tracks, err := postAudioMuseSimilarTracks(server, "/api/alchemy", "song_alchemy", body)
+	if err != nil {
+		return nil, err
 	}
 
 	pdk.Log(pdk.LogInfo, fmt.Sprintf("[AudioMuse] Successfully parsed %d similar tracks", len(tracks)))
@@ -351,13 +383,9 @@ func apiErrorMessage(body []byte) string {
 	return string(body)
 }
 
-func postAudioMuseSimilarTracks(server, endpoint, label, itemID string, count int, extra map[string]any) ([]audioMuseTrackResponse, error) {
+func postAudioMuseSimilarTracks(server, endpoint, label string, body map[string]any) ([]audioMuseTrackResponse, error) {
 	apiBaseURL := getConfigString(configAPIUrl, defaultAPIUrl)
 
-	body := map[string]any{"item_id": itemID, "limit": count}
-	for key, value := range extra {
-		body[key] = value
-	}
 	if server != "" {
 		body["server"] = server
 	}

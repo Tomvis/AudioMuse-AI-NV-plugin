@@ -24,7 +24,7 @@ func setup(t *testing.T, cfg map[string]string) {
 	host.HTTPMock.Calls = nil
 	pdk.PDKMock.On("Log", mock.Anything, mock.Anything).Return()
 	for _, key := range []string{configAPIUrl, configAPIToken, configServer, configEliminateDuplicates,
-		configRadiusSimilarity, configInstantMixSource, "artistSimilarCount"} {
+		configRadiusSimilarity, configInstantMixSource, configAlchemyTemperature, "artistSimilarCount"} {
 		v, ok := cfg[key]
 		pdk.PDKMock.On("GetConfig", key).Return(v, ok)
 	}
@@ -116,6 +116,17 @@ func TestLyricsSourceFallsThrough(t *testing.T) {
 
 	resp, err := (&audioMusePlugin{}).GetSimilarSongsByTrack(metadata.SimilarSongsByTrackRequest{ID: "l1", Count: 5})
 	if err != nil || len(resp.Songs) != 1 || resp.Songs[0].ID != "l2" {
+		t.Fatalf("got %+v, %v", resp, err)
+	}
+}
+
+func TestSongAlchemySourceFallsThrough(t *testing.T) {
+	setup(t, map[string]string{configServer: "tom-id,lera-id", configInstantMixSource: instantMixSongAlchemy})
+	onServer("tom-id", 404, notFoundBody)
+	onServer("lera-id", 200, `{"results":[{"item_id":"a2","distance":0.2}]}`)
+
+	resp, err := (&audioMusePlugin{}).GetSimilarSongsByTrack(metadata.SimilarSongsByTrackRequest{ID: "a1", Count: 5})
+	if err != nil || len(resp.Songs) != 1 || resp.Songs[0].ID != "a2" {
 		t.Fatalf("got %+v, %v", resp, err)
 	}
 }
